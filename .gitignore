@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+backend/storage/*/
+!backend/storage/.gitkeep
+backend/storage/.gitkeep
+server.log
+nohup.out
+.venv/
+*.tmp
+scripts/mall_dataset/
