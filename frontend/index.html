@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Feature Mining Platform · 特征挖掘平台</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="logo">🧠 Feature Mining Platform</div>
+    <nav class="tabs">
+      <button data-tab="datasets"      class="tab active">① 数据集</button>
+      <button data-tab="features"      class="tab">② 特征计算</button>
+      <button data-tab="labels"        class="tab">③ 标签集</button>
+      <button data-tab="select"        class="tab">④ 特征选择</button>
+      <button data-tab="viz"           class="tab">⑤ 特征可视化</button>
+      <button data-tab="models"        class="tab">⑥ 模型选型</button>
+      <button data-tab="hpo"           class="tab">⑦ 寻优方法</button>
+      <button data-tab="pipelines"     class="tab">⑧ 训练 Pipeline</button>
+      <button data-tab="archives"      class="tab">⑨ 结果归档</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ========== Tab 1 : Datasets ========== -->
+    <section class="tab-pane active" id="tab-datasets">
+      <h2>① 数据集配置</h2>
+      <p class="hint">支持本地上传 (json/pkl/npy) 或通过 SSH 拉取远端数据集，并对接入数据集做结构可视化。</p>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>本地上传</h3>
+          <form id="ds-upload-form">
+            <label>命名 <input name="name" required placeholder="e.g. people_count_raw"></label>
+            <label>文件 <input type="file" name="file" accept=".json,.pkl,.pickle,.npy" required></label>
+            <button class="primary">上传</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3>SSH 远端接入</h3>
+          <form id="ds-ssh-form">
+            <label>命名 <input name="name" required></label>
+            <label>Host <input name="host" required placeholder="example.com"></label>
+            <div class="row">
+              <label>Port <input name="port" value="22" type="number"></label>
+              <label>User <input name="username" required></label>
+            </div>
+            <label>Password <input name="password" type="password"></label>
+            <label>Private Key (optional)
+              <textarea name="private_key" rows="3" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+            </label>
+            <label>Remote Path
+              <input name="remote_path" required placeholder="/data/features.json">
+            </label>
+            <button class="primary">SSH 拉取</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>已接入数据集</h3>
+        <div id="ds-list" class="list"></div>
+      </div>
+    </section>
+
+    <!-- ========== Tab 2 : Features (compute) ========== -->
+    <section class="tab-pane" id="tab-features">
+      <h2>② 特征计算配置</h2>
+      <p class="hint">支持 (1) 直接将数据集作为特征集；(2) 通过画布拖拽节点搭建特征计算图，运行后归档为新特征集。</p>
+
+      <div class="card">
+        <h3>(1) 直接将数据集 → 特征集</h3>
+        <form id="fs-promote-form" class="inline">
+          <label>选择数据集 <select name="dataset_id" id="promote-ds-select"></select></label>
+          <label>新特征集名 <input name="name" required placeholder="e.g. people_count_features"></label>
+          <button class="primary">归档为特征集</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>(2) 特征计算图（画布）</h3>
+        <details>
+          <summary><b>📖 画布拖拽计算使用说明</b>（点击展开）</summary>
+          <div class="manual">
+            <ol>
+              <li>在左侧 <b>节点库</b> 点击 <b>+ 数据集 / 特征集</b> 添加输入节点；选择对应的数据集或特征集 ID。</li>
+              <li>点击 <b>+ 计算节点</b>，从下拉菜单选择数学计算（如 standardize、concat、add 等）。</li>
+              <li>每个节点都有 <b>输入端口（左）</b> 和 <b>输出端口（右）</b>。<b>按住</b>右端口拖动到下一个节点的左端口即可<b>连线</b>。</li>
+              <li>双击节点可设置参数（如 filter_keys 的 allow_keys、scale 的 factor）。</li>
+              <li>添加 <b>+ 输出节点</b> 标记希望归档的结果。每个 output 节点会被保存为一个独立的新特征集。</li>
+              <li>点击 <b>保存为配置</b>，给配置命名，可在右侧 <b>已保存配置</b> 中复用，并可一键 <b>运行配置</b> 生成新特征集（可在「② 特征计算」末尾下载）。</li>
+              <li>商场分类示例图建议：
+                <code>input(人数)→standardize → concat(原始,标准化) → filter_keys(label keys) → output</code>。
+              </li>
+              <li>右键节点可<b>删除节点</b>；按住空白拖动可平移画布；右上角缩放按钮可放大/缩小。</li>
+            </ol>
+          </div>
+        </details>
+
+        <div class="canvas-wrap">
+          <aside class="palette">
+            <h4>节点库</h4>
+            <button id="add-input-node">+ 数据集/特征集</button>
+            <button id="add-op-node">+ 计算节点</button>
+            <button id="add-output-node">+ 输出节点</button>
+            <hr>
+            <button id="save-graph" class="primary">💾 保存为配置</button>
+            <button id="clear-graph" class="warn">🗑 清空画布</button>
+            <hr>
+            <div class="zoom-bar">
+              <button id="zoom-in">＋</button>
+              <button id="zoom-out">－</button>
+              <button id="zoom-reset">⤢</button>
+              <span id="zoom-level">100%</span>
+            </div>
+          </aside>
+          <div id="canvas-host" class="canvas-host">
+            <svg id="canvas-svg"></svg>
+            <div id="canvas-nodes"></div>
+            <div class="canvas-empty">将节点拖动到画布上 — 拖拽节点右侧 ● 到下一个节点左侧 ● 完成连线</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>已保存的特征计算配置</h3>
+          <div id="fc-list" class="list"></div>
+        </div>
+        <div class="card">
+          <h3>已生成的特征集（可下载）</h3>
+          <div id="fs-list" class="list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Tab 3 : Labels ========== -->
+    <section class="tab-pane" id="tab-labels">
+      <h2>③ 标签集导入</h2>
+      <p class="hint">上传 json / pkl，key 为样本 ID，value 为标签（字符串/数字/类别）。上传时会自动新增标签集配置并展示分布。</p>
+      <div class="card">
+        <h3>上传新标签集</h3>
+        <form id="lb-upload-form" class="inline">
+          <label>命名 <input name="name" required placeholder="e.g. mall_label"></label>
+          <label>文件 <input type="file" name="file" accept=".json,.pkl,.pickle" required></label>
+          <button class="primary">上传</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>已导入标签集</h3>
+        <div id="lb-list" class="list"></div>
+      </div>
+    </section>
+
+    <!-- ========== Tab 4 : Feature Selection ========== -->
+    <section class="tab-pane" id="tab-select">
+      <h2>④ 特征选择配置</h2>
+      <p class="hint">支持 (1) 低质量特征过滤策略（值过滤/方差过滤/缺失剔除/topK 方差）；(2) 配置特征重要性策略（手动权重 / 方差权重 / 均匀）。</p>
+
+      <div class="card">
+        <h3>新建特征选择配置</h3>
+        <form id="fsel-form">
+          <label>命名 <input name="name" required></label>
+
+          <h4>过滤策略 (filters)</h4>
+          <div id="fsel-filters" class="filter-list"></div>
+          <div class="row">
+            <button type="button" data-add-filter="value_range">+ 值过滤 value_range</button>
+            <button type="button" data-add-filter="variance">+ 方差过滤 variance</button>
+            <button type="button" data-add-filter="missing_drop">+ 剔除缺失 missing_drop</button>
+            <button type="button" data-add-filter="topk_variance">+ Top-K 方差 topk_variance</button>
+          </div>
+
+          <h4>重要性策略 (importance)</h4>
+          <label>strategy
+            <select name="importance_strategy">
+              <option value="uniform">uniform — 全部权重 1</option>
+              <option value="variance">variance — 按方差加权</option>
+              <option value="manual">manual — 手动权重</option>
+            </select>
+          </label>
+          <label>weights (manual 时使用，逗号分隔)
+            <input name="importance_weights" placeholder="1.0, 1.5, 0.5">
+          </label>
+
+          <button class="primary">保存配置</button>
+        </form>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>已保存的特征选择配置</h3>
+          <div id="fsel-list" class="list"></div>
+        </div>
+        <div class="card">
+          <h3>预览（应用到指定特征集）</h3>
+          <form id="fsel-preview-form" class="inline">
+            <label>配置 <select id="fsel-preview-cfg"></select></label>
+            <label>特征集 <select id="fsel-preview-fs"></select></label>
+            <button class="primary">预览</button>
+          </form>
+          <pre id="fsel-preview-out"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Tab 5 : Visualization ========== -->
+    <section class="tab-pane" id="tab-viz">
+      <h2>⑤ 特征分布可视化</h2>
+      <p class="hint">支持单 key 时间曲线（如某商场 48 维曲线）和全量分布（直方图 + 列均值/标准差）。</p>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>单样本时间曲线</h3>
+          <form id="viz-single-form" class="inline">
+            <label>特征集 <select id="viz-fs-1"></select></label>
+            <label>Key <input id="viz-key" placeholder="位置ID"></label>
+            <button class="primary">绘制</button>
+          </form>
+          <canvas id="viz-single-chart" height="180"></canvas>
+        </div>
+
+        <div class="card">
+          <h3>全量分布</h3>
+          <form id="viz-dist-form" class="inline">
+            <label>特征集 <select id="viz-fs-2"></select></label>
+            <label>列号 <input id="viz-col" type="number" value="0" min="0"></label>
+            <label>分桶数 <input id="viz-bins" type="number" value="30" min="2"></label>
+            <button class="primary">绘制</button>
+          </form>
+          <canvas id="viz-hist-chart" height="180"></canvas>
+          <canvas id="viz-mean-chart" height="180"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Tab 6 : Models ========== -->
+    <section class="tab-pane" id="tab-models">
+      <h2>⑥ 模型算法选型</h2>
+      <p class="hint">支持 RF / 决策树 / 逻辑回归 / KNN / 朴素贝叶斯 / KMeans / AE / MLP（深度学习）。可分别配置参数和参数范围（参数范围在 ⑦ 寻优方法中复用）。</p>
+
+      <div class="card">
+        <h3>新建模型配置</h3>
+        <form id="model-form">
+          <label>命名 <input name="name" required placeholder="e.g. mall_AE_32 / mall_MLP"></label>
+          <label>算法
+            <select name="algo" id="algo-select"></select>
+          </label>
+          <div id="algo-params" class="params"></div>
+          <button class="primary">保存</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>已保存的模型配置</h3>
+        <div id="model-list" class="list"></div>
+      </div>
+    </section>
+
+    <!-- ========== Tab 7 : HPO ========== -->
+    <section class="tab-pane" id="tab-hpo">
+      <h2>⑦ 模型迭代寻优方法</h2>
+      <p class="hint">基于配置的参数空间和优先级，遍历所有组合或使用贝叶斯搜索（skopt）。</p>
+
+      <div class="card">
+        <h3>新建寻优配置</h3>
+        <form id="hpo-form">
+          <label>命名 <input name="name" required placeholder="e.g. RF_grid_search"></label>
+          <label>策略
+            <select name="strategy">
+              <option value="grid">grid — 网格搜索（无反馈）</option>
+              <option value="random">random — 随机搜索</option>
+              <option value="bayes">bayes — 贝叶斯搜索</option>
+            </select>
+          </label>
+          <label>最大试验数 max_trials
+            <input name="max_trials" type="number" value="10" min="1">
+          </label>
+          <label>参数空间 param_space (JSON)
+            <textarea name="param_space" rows="6"
+              placeholder='{"n_estimators":{"type":"int","low":50,"high":300},"max_depth":{"type":"int","low":3,"high":20}}'></textarea>
+          </label>
+          <label>优先级 priorities (逗号分隔，仅 grid)
+            <input name="priorities" placeholder="max_depth,n_estimators">
+          </label>
+          <label>Bayes 参数 (JSON, 仅 bayes)
+            <textarea name="bayes" rows="3" placeholder='{"n_initial_points":5,"acq_func":"EI"}'></textarea>
+          </label>
+          <label>seed <input name="seed" type="number" value="0"></label>
+          <button class="primary">保存</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>已保存的寻优配置</h3>
+        <div id="hpo-list" class="list"></div>
+      </div>
+    </section>
+
+    <!-- ========== Tab 8 : Pipelines ========== -->
+    <section class="tab-pane" id="tab-pipelines">
+      <h2>⑧ 模型训练任务 Pipeline</h2>
+      <p class="hint">通过下方表单（拖拽式六节点）选择各模块配置并组装训练任务。多特征集会取样本交集；多模型按 chain 顺序串联（AE→...→MLP/分类器）。</p>
+
+      <div class="card">
+        <h3>新建训练任务</h3>
+        <form id="pipeline-form">
+          <label>任务名 <input name="name" required placeholder="e.g. 商场分类"></label>
+
+          <fieldset>
+            <legend>① 数据/特征集（多选 — 训练时取样本交集）</legend>
+            <div id="pl-feature-sets" class="checkbox-list"></div>
+            <label>多特征集组装方式 feature_combine
+              <select name="feature_combine">
+                <option value="concat">concat — 列拼接（推荐）</option>
+                <option value="sum">sum — 元素求和</option>
+                <option value="mean">mean — 元素均值</option>
+              </select>
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>② 特征计算配置（可选）</legend>
+            <select name="feature_compute_id"><option value="">— 不使用 —</option></select>
+            <small>说明：当前 pipeline 假定你已通过「② 特征计算」运行配置生成了上方所选特征集。这里可记录原始计算配置 ID 以便溯源。</small>
+          </fieldset>
+
+          <fieldset>
+            <legend>③ 标签集（必选）</legend>
+            <select name="label_set_id" required></select>
+          </fieldset>
+
+          <fieldset>
+            <legend>④ 特征选择配置（可选）</legend>
+            <select name="feature_select_id"><option value="">— 不使用 —</option></select>
+          </fieldset>
+
+          <fieldset>
+            <legend>⑤ 模型链 model_chain（按顺序，例 AE → MLP）</legend>
+            <div id="pl-model-chain" class="model-chain"></div>
+            <button type="button" id="pl-add-model">+ 添加模型节点</button>
+          </fieldset>
+
+          <fieldset>
+            <legend>⑥ 寻优方法（可选 — 应用到 chain 末端模型）</legend>
+            <select name="hpo_id"><option value="">— 不使用 —</option></select>
+          </fieldset>
+
+          <fieldset>
+            <legend>训练设置</legend>
+            <div class="row">
+              <label>设备
+                <select name="device">
+                  <option value="cpu">CPU</option>
+                  <option value="gpu">GPU (若可用)</option>
+                </select>
+              </label>
+              <label>验证集比例 <input name="val_ratio" type="number" step="0.05" value="0.2" min="0.05" max="0.5"></label>
+              <label>早停 patience <input name="early_stop_patience" type="number" value="30" min="1"></label>
+              <label>min_delta <input name="min_delta" type="number" step="0.0001" value="0.00001"></label>
+            </div>
+          </fieldset>
+
+          <button class="primary big">保存 Pipeline</button>
+        </form>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>已保存的 Pipeline</h3>
+          <div id="pl-list" class="list"></div>
+        </div>
+        <div class="card">
+          <h3>运行日志（自动迭代/收敛理由）</h3>
+          <div id="pl-run-log" class="run-log"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== Tab 9 : Archives ========== -->
+    <section class="tab-pane" id="tab-archives">
+      <h2>⑨ 模型结果归档与评估</h2>
+      <p class="hint">每次 pipeline 运行完成后，模型权重 / 参数 / 评估指标 / 验证集 TP-FP-FN-TN keys 都会被归档，可在此查看与下载。</p>
+      <div class="card">
+        <div id="ar-list" class="list"></div>
+      </div>
+      <div class="card" id="ar-detail-card" style="display:none">
+        <h3 id="ar-detail-title">归档详情</h3>
+        <div class="grid-2">
+          <div>
+            <h4>关键指标</h4>
+            <pre id="ar-metrics"></pre>
+            <h4>混淆矩阵 (val)</h4>
+            <canvas id="ar-cm-chart" height="180"></canvas>
+            <h4>HPO 历史 (score 曲线)</h4>
+            <canvas id="ar-hpo-chart" height="180"></canvas>
+          </div>
+          <div>
+            <h4>迭代日志 (Module 7 收敛理由)</h4>
+            <pre id="ar-iter"></pre>
+            <h4>验证集 TP/FP/FN/TN keys</h4>
+            <pre id="ar-tp"></pre>
+            <h4>归档文件</h4>
+            <div id="ar-files"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
